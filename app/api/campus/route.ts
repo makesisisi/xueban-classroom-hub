@@ -1,0 +1,17 @@
+import { env } from 'cloudflare:workers';
+import { getChatGPTUser } from '@/app/chatgpt-auth';
+import { d1Store } from '@/lib/d1-store';
+import { handle } from '@/lib/service';
+export const dynamic = 'force-dynamic';
+async function route(req: Request) {
+  const user = await getChatGPTUser();
+  return handle(req, {
+    store: d1Store(env.DB),
+    identity: user
+      ? { id: user.userId, name: user.displayName, email: user.email }
+      : null,
+    provider: 'sites',
+    setupSecret: (env as unknown as Record<string, string>).ADMIN_SETUP_SECRET,
+  });
+}
+export { route as GET, route as POST };
