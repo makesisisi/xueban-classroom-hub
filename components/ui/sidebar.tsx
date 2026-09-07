@@ -196,8 +196,8 @@ function Sidebar({
           side={side}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>Sidebar</SheetTitle>
-            <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+            <SheetTitle>班级导航</SheetTitle>
+            <SheetDescription>显示手机端班级导航。</SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
@@ -260,6 +260,7 @@ function SidebarTrigger({
 
   return (
     <Button
+      aria-label="打开或收起导航"
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
       variant="ghost"
@@ -272,7 +273,7 @@ function SidebarTrigger({
       {...props}
     >
       <PanelLeftIcon className="cn-rtl-flip" />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">打开或收起导航</span>
     </Button>
   );
 }

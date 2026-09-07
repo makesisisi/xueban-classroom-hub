@@ -6,7 +6,8 @@ import { toast } from 'sonner';
 export default function Account({ data, run, busy, reload }: any) {
   const [mode, setMode] = useState('login'),
     [authBusy, setAuthBusy] = useState(false),
-    [reset, setReset] = useState(false);
+    [reset, setReset] = useState(false),
+    [notice, setNotice] = useState('');
   useEffect(() => {
     if (data.provider !== 'netlify') return;
     let active = true;
@@ -19,14 +20,16 @@ export default function Account({ data, run, busy, reload }: any) {
           toast.info('请设置新密码');
         } else {
           toast.success('账号验证成功');
-          await reload();
+          const fresh = await reload();
+          if (fresh.profile || fresh.isAdmin) window.location.href = '/';
+          else setNotice('账号已验证。请填写姓名、学号和班级邀请码。');
         }
       })
       .catch((e) => toast.error(e.message));
     return () => {
       active = false;
     };
-  }, [data.provider]);
+  }, [data.provider, reload]);
   async function authSubmit(e: any) {
     e.preventDefault();
     const v = values(e);
@@ -41,17 +44,26 @@ export default function Account({ data, run, busy, reload }: any) {
         const u = await auth.signup(String(v.email), String(v.password), {
           full_name: String(v.name),
         });
-        toast.success(
-          u.confirmedAt ? '注册成功' : '请查收邮件，点击确认链接后登录',
-        );
+        if (u.confirmedAt) {
+          setNotice('注册成功，现在可以登录。');
+        } else {
+          setMode('login');
+          setNotice('确认邮件已发送。请先点击邮件里的链接，再回到这里登录。');
+        }
+        toast.success(u.confirmedAt ? '注册成功' : '确认邮件已发送');
       } else if (mode === 'recovery') {
         await auth.requestPasswordRecovery(String(v.email));
+        setNotice(
+          '如果账号存在，密码重置邮件已经发送。请查看收件箱和垃圾邮件。',
+        );
         toast.success('如果账号存在，你会收到密码重置邮件');
       } else {
         await auth.login(String(v.email), String(v.password));
         toast.success('欢迎回来');
       }
-      await reload();
+      const fresh = await reload();
+      if (mode === 'login' && (fresh.profile || fresh.isAdmin))
+        window.location.href = '/';
     } catch (e: any) {
       toast.error(e.message || '暂时无法登录，请稍后重试');
     } finally {
@@ -80,6 +92,7 @@ export default function Account({ data, run, busy, reload }: any) {
           <p className="muted">
             登录并加入班级后，即可查看老师档案、打卡和参与交流。
           </p>
+          {notice && <output className="info-box">{notice}</output>}
           {data.provider === 'sites' ? (
             <>
               <a
@@ -168,7 +181,8 @@ export default function Account({ data, run, busy, reload }: any) {
           className="form-stack mt-5"
           onSubmit={async (e) => {
             e.preventDefault();
-            await run({ action: 'join', ...values(e) }, '个人资料已保存');
+            if (await run({ action: 'join', ...values(e) }, '个人资料已保存'))
+              window.location.href = data.isAdmin ? '/admin' : '/';
           }}
         >
           <Field
@@ -187,7 +201,7 @@ export default function Account({ data, run, busy, reload }: any) {
             <Field label="班级邀请码" name="code" max={80} />
           )}
           <button className="button" disabled={busy}>
-            保存并{data.profile ? '更新资料' : '加入班级'}
+            {busy ? '保存中…' : data.profile ? '保存资料' : '加入班级'}
           </button>
         </form>
       </section>
@@ -201,10 +215,13 @@ export default function Account({ data, run, busy, reload }: any) {
             className="form-stack mt-5"
             onSubmit={async (e) => {
               e.preventDefault();
-              await run(
-                { action: 'claim-admin', ...values(e) },
-                '管理员已设置，请前往学委工作台',
-              );
+              if (
+                await run(
+                  { action: 'claim-admin', ...values(e) },
+                  '管理员已设置',
+                )
+              )
+                window.location.href = '/admin';
             }}
           >
             <Field

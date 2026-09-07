@@ -79,6 +79,27 @@ const formatDate = (v: string) =>
     minute: '2-digit',
     hour12: false,
   });
+const dueText = (v: string, currentTime: number) => {
+  const target = new Date(v);
+  const now = new Date(currentTime);
+  const day = new Date(
+    target.getFullYear(),
+    target.getMonth(),
+    target.getDate(),
+  );
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((day.getTime() - today.getTime()) / 86400000);
+  const time = target.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  if (target.getTime() < now.getTime()) return `已于 ${formatDate(v)} 截止`;
+  if (days === 0) return `今天 ${time} 截止`;
+  if (days === 1) return `明天 ${time} 截止`;
+  if (days > 1 && days <= 7) return `${days} 天后 · ${formatDate(v)} 截止`;
+  return `${formatDate(v)} 截止`;
+};
 function Empty({
   icon: Icon = BookOpen,
   title = '还没有内容',
@@ -116,10 +137,21 @@ export default function Campus() {
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
     [modal, setModal] = useState<any>(null),
-    [filter, setFilter] = useState('全部'),
-    [search, setSearch] = useState(''),
+    [now, setNow] = useState(() => Date.now()),
+    [assignmentFilter, setAssignmentFilter] = useState('全部'),
+    [communityFilter, setCommunityFilter] = useState('全部'),
+    [searches, setSearches] = useState<Record<string, string>>({}),
     [adminTab, setAdminTab] = useState('作业统计'),
     [selected, setSelected] = useState('');
+  const section = path.split('/')[1] || 'home',
+    detailId = path.split('/')[2];
+  const search = searches[section] || '';
+  const setSearch = (value: string) =>
+    setSearches((current) => ({ ...current, [section]: value }));
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
   const reload = useCallback(async () => {
     try {
       const r = await fetch('/api/campus', { cache: 'no-store' });
@@ -224,8 +256,6 @@ export default function Campus() {
     } catch {}
     return () => controller.abort();
   }, [reload]);
-  const section = path.split('/')[1] || 'home',
-    detailId = path.split('/')[2];
   const label =
     nav.find(([href]) => href === `/${section}`)?.[1] ||
     (section === 'account' ? '我的账号' : '班级概览');
@@ -245,9 +275,24 @@ export default function Campus() {
   const status = (a: any) =>
     subFor(a.id)
       ? '已打卡'
-      : Date.now() > Date.parse(a.dueAt)
-        ? '已截止'
+      : now > Date.parse(a.dueAt)
+        ? a.allowLate
+          ? '可补交'
+          : '已截止'
         : '待完成';
+  const actionableTasks = tasks.filter((a: any) =>
+    ['待完成', '可补交'].includes(status(a)),
+  );
+  const homeAction = !data.identity
+    ? { href: '/account', label: '登录并加入班级' }
+    : !member
+      ? { href: '/account', label: '填写班级资料' }
+      : {
+          href: '/assignments',
+          label: actionableTasks.length
+            ? `继续完成 ${actionableTasks.length} 份作业`
+            : '查看作业清单',
+        };
   const titles: any = {
     home: '新的一天，学习有伴',
     assignments: '作业打卡',
@@ -306,11 +351,11 @@ export default function Campus() {
               <span className="task-course">{a.course}</span>
               <h3>{a.title}</h3>
               <p>
-                <Clock size={13} /> {formatDate(a.dueAt)} 截止
+                <Clock size={13} /> {dueText(a.dueAt, now)}
               </p>
             </div>
             <span
-              className={`pill ${status(a) === '已打卡' ? 'green' : status(a) === '已截止' ? 'orange' : ''}`}
+              className={`pill ${status(a) === '已打卡' ? 'green' : ['已截止', '可补交'].includes(status(a)) ? 'orange' : ''}`}
             >
               {status(a)}
             </span>
@@ -336,8 +381,9 @@ export default function Campus() {
           [
             ClipboardCheck,
             '待完成作业',
-            member ? tasks.filter((a: any) => !subFor(a.id)).length : '—',
+            member ? actionableTasks.length : '—',
             '把截止时间记在心上',
+            '/assignments',
           ],
           [
             Check,
@@ -348,12 +394,14 @@ export default function Campus() {
                 ).length
               : '—',
             '每一份努力都算数',
+            '/assignments',
           ],
           [
             Users,
             '老师档案',
             member ? teachers.length : '—',
             '联系方式与上课技巧',
+            '/teachers',
           ],
           [
             MessageCircle,
@@ -362,16 +410,17 @@ export default function Campus() {
               ? posts.filter((p: any) => p.status === 'published').length
               : '—',
             '提问、经验和小吐槽',
+            '/community',
           ],
-        ].map(([Icon, name, count, desc]: any) => (
-          <div className="stat-card" key={name}>
+        ].map(([Icon, name, count, desc, href]: any) => (
+          <a className="stat-card" href={member ? href : '/account'} key={name}>
             <span className="stat-icon">
               <Icon size={21} />
             </span>
             <span className="muted">{name}</span>
             <strong>{count}</strong>
             <small>{desc}</small>
-          </div>
+          </a>
         ))}
       </div>
     );
@@ -388,9 +437,8 @@ export default function Campus() {
               都有人和你一起。
             </h2>
             <p>作业、老师、班级消息，一个地方就够了。</p>
-            <a href={member ? '/assignments' : '/account'}>
-              {member ? '看看今天的学习安排' : '加入班级'}{' '}
-              <ArrowUpRight size={17} />
+            <a href={homeAction.href}>
+              {homeAction.label} <ArrowUpRight size={17} />
             </a>
           </div>
           <div className="banner-aside">
@@ -411,9 +459,7 @@ export default function Campus() {
               </a>
             </div>
             {member ? (
-              <TaskRows
-                items={tasks.filter((a: any) => !subFor(a.id)).slice(0, 4)}
-              />
+              <TaskRows items={actionableTasks.slice(0, 4)} />
             ) : (
               <Empty
                 icon={ClipboardCheck}
@@ -500,7 +546,7 @@ export default function Campus() {
           <h2 className="detail-title">{a.title}</h2>
           <div className="detail-meta">
             <Clock size={17} />
-            {formatDate(a.dueAt)} 截止{' '}
+            {dueText(a.dueAt, now)}{' '}
             <span className="pill">
               {a.allowLate ? '允许补交' : '不允许迟交'}
             </span>
@@ -526,14 +572,24 @@ export default function Campus() {
               )}
             </div>
           )}
+          {!sub && !a.allowLate && now > Date.parse(a.dueAt) && (
+            <p className="info-box deadline-note" role="status">
+              这份作业已经截止，当前不能再打卡。如需补交，请联系学委或任课老师。
+            </p>
+          )}
           <button
             className="button"
-            disabled={!a.allowLate && Date.now() > Date.parse(a.dueAt)}
+            disabled={!a.allowLate && now > Date.parse(a.dueAt)}
             onClick={() =>
               setModal({ kind: 'submit', item: a, submission: sub })
             }
           >
-            {sub ? '更新我的打卡' : '确认已交作业'} <Check size={17} />
+            {!a.allowLate && now > Date.parse(a.dueAt)
+              ? '已截止，无法打卡'
+              : sub
+                ? '更新我的打卡'
+                : '确认已交作业'}{' '}
+            <Check size={17} />
           </button>
           <p className="muted mt-3">打卡记录不代替老师要求的实际作业提交。</p>
         </section>
@@ -549,9 +605,12 @@ export default function Campus() {
             </button>
           )}
         </Toolbar>
-        <Tabs value={filter} onValueChange={(v) => setFilter(String(v))}>
+        <Tabs
+          value={assignmentFilter}
+          onValueChange={(v) => setAssignmentFilter(String(v))}
+        >
           <TabsList className="filter-tabs">
-            {['全部', '待完成', '已打卡', '已截止'].map((v) => (
+            {['全部', '待完成', '可补交', '已打卡', '已截止'].map((v) => (
               <TabsTrigger key={v} value={v}>
                 {v}
               </TabsTrigger>
@@ -561,7 +620,8 @@ export default function Campus() {
         <TaskRows
           items={tasks.filter(
             (a: any) =>
-              includes(a) && (filter === '全部' || status(a) === filter),
+              includes(a) &&
+              (assignmentFilter === '全部' || status(a) === assignmentFilter),
           )}
         />
       </section>
@@ -728,7 +788,10 @@ export default function Campus() {
         </Toolbar>
         <div className="community-layout">
           <section>
-            <Tabs value={filter} onValueChange={(v) => setFilter(String(v))}>
+            <Tabs
+              value={communityFilter}
+              onValueChange={(v) => setCommunityFilter(String(v))}
+            >
               <TabsList className="filter-tabs">
                 {['全部', '学习提问', '经验分享', '小吐槽'].map((v) => (
                   <TabsTrigger value={v} key={v}>
@@ -740,7 +803,9 @@ export default function Campus() {
             {posts
               .filter(
                 (p: any) =>
-                  includes(p) && (filter === '全部' || p.category === filter),
+                  includes(p) &&
+                  (communityFilter === '全部' ||
+                    p.category === communityFilter),
               )
               .map((p: any) => (
                 <a
@@ -778,7 +843,8 @@ export default function Campus() {
               ))}
             {!posts.filter(
               (p: any) =>
-                includes(p) && (filter === '全部' || p.category === filter),
+                includes(p) &&
+                (communityFilter === '全部' || p.category === communityFilter),
             ).length && (
               <section className="panel">
                 <Empty
@@ -992,7 +1058,7 @@ export default function Campus() {
                   value={rows.length ? (done / rows.length) * 100 : 0}
                   className="my-4"
                 />
-                <Table>
+                <Table className="submission-table">
                   <TableHeader>
                     <TableRow>
                       <TableHead>姓名</TableHead>
@@ -1004,9 +1070,9 @@ export default function Campus() {
                   <TableBody>
                     {rows.map((r: any) => (
                       <TableRow key={r.id}>
-                        <TableCell>{r.name}</TableCell>
-                        <TableCell>{r.studentId}</TableCell>
-                        <TableCell>
+                        <TableCell data-label="姓名">{r.name}</TableCell>
+                        <TableCell data-label="学号">{r.studentId}</TableCell>
+                        <TableCell data-label="状态">
                           <span
                             className={`pill ${r.submission ? 'green' : 'orange'}`}
                           >
@@ -1017,7 +1083,7 @@ export default function Campus() {
                               : '未交'}
                           </span>
                         </TableCell>
-                        <TableCell>
+                        <TableCell data-label="提交信息">
                           {r.submission
                             ? formatDate(r.submission.createdAt)
                             : '—'}
@@ -1232,28 +1298,30 @@ export default function Campus() {
             <span>{data.settings.semester}</span>
           </div>
           <nav className="side-nav">
-            {nav.map(([url, name, Icon]) => (
-              <a
-                href={url}
-                key={url}
-                className={
-                  (url === '/' ? section === 'home' : path.startsWith(url))
-                    ? 'active'
-                    : ''
-                }
-                aria-current={
-                  (url === '/' ? section === 'home' : path.startsWith(url))
-                    ? 'page'
-                    : undefined
-                }
-              >
-                <Icon size={20} />
-                {name}
-                {(url === '/' ? section === 'home' : path.startsWith(url)) && (
-                  <span className="nav-dot" />
-                )}
-              </a>
-            ))}
+            {nav
+              .filter(([url]) => url !== '/admin' || data.isAdmin)
+              .map(([url, name, Icon]) => (
+                <a
+                  href={url}
+                  key={url}
+                  className={
+                    (url === '/' ? section === 'home' : path.startsWith(url))
+                      ? 'active'
+                      : ''
+                  }
+                  aria-current={
+                    (url === '/' ? section === 'home' : path.startsWith(url))
+                      ? 'page'
+                      : undefined
+                  }
+                >
+                  <Icon size={20} />
+                  {name}
+                  {(url === '/'
+                    ? section === 'home'
+                    : path.startsWith(url)) && <span className="nav-dot" />}
+                </a>
+              ))}
           </nav>
           <div className="side-note">
             <Sparkles size={20} />
@@ -1312,8 +1380,8 @@ export default function Campus() {
               <p className="muted">{subtitles[section]}</p>
             </div>
             {section === 'home' && (
-              <a href="/assignments" className="button">
-                去交作业 <ArrowRight size={17} />
+              <a href={homeAction.href} className="button">
+                {homeAction.label} <ArrowRight size={17} />
               </a>
             )}
           </div>
