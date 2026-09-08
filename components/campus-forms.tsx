@@ -15,6 +15,8 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { FileUp, Paperclip, X } from 'lucide-react';
+import type { SubmissionAttachment } from '@/lib/service';
 export const values = (event: FormEvent<HTMLFormElement>) =>
   Object.fromEntries(new FormData(event.currentTarget));
 export function Field({
@@ -83,6 +85,33 @@ export function Editor({ modal, onClose, run, busy }: any) {
   const [allowLate, setAllowLate] = useState(modal.item?.allowLate ?? true),
     [category, setCategory] = useState('学习提问'),
     [anonymous, setAnonymous] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [attachments, setAttachments] = useState<SubmissionAttachment[]>(
+    modal.submission?.attachments || [],
+  );
+  const [fileError, setFileError] = useState('');
+  function selectFiles(selected: FileList | null) {
+    if (!selected) return;
+    const next = [...files, ...Array.from(selected)];
+    if (next.length + attachments.length > 5) {
+      setFileError('每份作业最多上传 5 个附件，请先移除不需要的文件。');
+      return;
+    }
+    if (
+      next.reduce((n, f) => n + f.size, 0) +
+        attachments.reduce((n, f) => n + f.size, 0) >
+      3 * 1024 * 1024
+    ) {
+      setFileError('附件合计不能超过 3 MB，请压缩图片或文件后重试。');
+      return;
+    }
+    if (next.some((f) => !f.size || f.name.length > 180)) {
+      setFileError('请选择非空文件，文件名不能超过 180 个字符。');
+      return;
+    }
+    setFiles(next);
+    setFileError('');
+  }
   const item = modal.item || {};
   const kind = modal.kind;
   const titles: any = {
@@ -96,9 +125,20 @@ export function Editor({ modal, onClose, run, busy }: any) {
     e.preventDefault();
     const v = values(e);
     let payload: any;
-    if (kind === 'submit')
-      payload = { action: 'submit', assignmentId: item.id, ...v };
-    else if (kind === 'post')
+    if (kind === 'submit') {
+      payload = new FormData();
+      payload.append(
+        'payload',
+        JSON.stringify({
+          action: 'submit',
+          assignmentId: item.id,
+          ...v,
+          version: modal.submission?.version ?? null,
+          attachments: attachments.map((a) => a.id),
+        }),
+      );
+      for (const file of files) payload.append('files', file);
+    } else if (kind === 'post')
       payload = { action: 'post', ...v, category, anonymous };
     else {
       if (kind === 'assignment')
@@ -114,7 +154,11 @@ export function Editor({ modal, onClose, run, busy }: any) {
     if (
       await run(
         payload,
-        kind === 'post' ? '已提交，审核后会展示给全班' : '已保存',
+        kind === 'post'
+          ? '已提交，审核后会展示给全班'
+          : kind === 'submit'
+            ? '作业已提交'
+            : '已保存',
       )
     )
       onClose();
@@ -254,10 +298,91 @@ export function Editor({ modal, onClose, run, busy }: any) {
           {kind === 'submit' && (
             <>
               <p className="info-box">
-                这是提交记录。若老师要求在其他平台或线下交作业，请先完成实际提交，再来打卡。
+                可以直接上传作业图片或文件，无需填写链接。若老师指定了其他提交平台，请同时按老师要求提交。
               </p>
+              <div className="field">
+                <span>作业图片 / 文件</span>
+                <label className="file-upload">
+                  <FileUp size={24} aria-hidden="true" />
+                  <strong>选择图片或文件</strong>
+                  <span className="muted">
+                    支持照片、PDF、Word 等文件；最多 5 个，合计 3 MB
+                  </span>
+                  <input
+                    type="file"
+                    multiple
+                    disabled={busy}
+                    aria-label="选择作业图片或文件"
+                    aria-describedby="attachment-help"
+                    onChange={(e) => {
+                      selectFiles(e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                <p id="attachment-help" className="muted">
+                  附件仅你本人和学委可下载。也可以只填写说明或确认已交。
+                </p>
+                {(attachments.length > 0 || files.length > 0) && (
+                  <ul className="attachment-list">
+                    {attachments.map((file) => (
+                      <li key={file.id}>
+                        <Paperclip size={16} aria-hidden="true" />
+                        <span>
+                          {file.name}{' '}
+                          <small>
+                            已上传 · {Math.ceil(file.size / 1024)} KB
+                          </small>
+                        </span>
+                        <button
+                          type="button"
+                          className="attachment-remove"
+                          disabled={busy}
+                          aria-label={`移除 ${file.name}`}
+                          onClick={() => {
+                            setAttachments(
+                              attachments.filter((a) => a.id !== file.id),
+                            );
+                            setFileError('');
+                          }}
+                        >
+                          <X size={16} />
+                        </button>
+                      </li>
+                    ))}
+                    {files.map((file, i) => (
+                      <li key={`${file.name}-${i}`}>
+                        <Paperclip size={16} aria-hidden="true" />
+                        <span>
+                          {file.name}{' '}
+                          <small>
+                            待上传 · {Math.ceil(file.size / 1024)} KB
+                          </small>
+                        </span>
+                        <button
+                          type="button"
+                          className="attachment-remove"
+                          disabled={busy}
+                          aria-label={`移除 ${file.name}`}
+                          onClick={() => {
+                            setFiles(files.filter((_, index) => i !== index));
+                            setFileError('');
+                          }}
+                        >
+                          <X size={16} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {fileError && (
+                  <p role="alert" className="attachment-error">
+                    {fileError}
+                  </p>
+                )}
+              </div>
               <Field
-                label="作业 / 提交凭证链接（HTTPS，可选）"
+                label="补充链接（可选）"
                 name="link"
                 type="url"
                 value={modal.submission?.link}
@@ -284,7 +409,13 @@ export function Editor({ modal, onClose, run, busy }: any) {
               取消
             </button>
             <button className="button" disabled={busy}>
-              {busy ? '正在保存…' : kind === 'submit' ? '确认已交作业' : '保存'}
+              {busy
+                ? kind === 'submit'
+                  ? '正在提交，请稍候…'
+                  : '正在保存…'
+                : kind === 'submit'
+                  ? '提交作业'
+                  : '保存'}
             </button>
           </div>
         </form>

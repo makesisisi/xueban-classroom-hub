@@ -40,8 +40,20 @@ export default async (req: Request) => {
     },
   };
   const user = await getUser();
+  const files = getStore({ name: 'campus-attachments', consistency: 'strong' });
   return handle(req, {
     store,
+    files: {
+      async put(key, data) {
+        await files.set(key, data);
+      },
+      async get(key) {
+        return files.get(key, { type: 'arrayBuffer' });
+      },
+      async delete(key) {
+        await files.delete(key);
+      },
+    },
     provider: 'netlify',
     identity: user
       ? {

@@ -4,6 +4,7 @@ export type RecordData = {
   createdAt: string;
   [key: string]: any;
 };
+export type SubmissionAttachment = { id: string; name: string; size: number };
 export interface Store {
   get(key: string): Promise<RecordData | null>;
   list(prefix: string): Promise<RecordData[]>;
@@ -21,6 +22,11 @@ export type Identity = {
 } | null;
 export type Runtime = {
   store: Store;
+  files?: {
+    put(key: string, data: ArrayBuffer): Promise<void>;
+    get(key: string): Promise<ArrayBuffer | null>;
+    delete(key: string): Promise<void>;
+  };
   identity: Identity;
   provider: 'sites' | 'netlify';
   setupSecret?: string;
@@ -83,15 +89,22 @@ export async function handle(
       },
     });
   try {
+    const multipart = request.headers
+      .get('content-type')
+      ?.includes('multipart/form-data');
+    const bodyLimit = multipart ? 3 * 1024 * 1024 + 24000 : 24000;
     if (!['GET', 'POST'].includes(request.method))
       return fail(405, '不支持的操作');
     if (request.method === 'POST') {
       const origin = request.headers.get('origin');
       if (!origin || origin !== new URL(request.url).origin)
         return fail(403, '请求来源不受信任，请刷新页面重试');
-      if (!request.headers.get('content-type')?.includes('application/json'))
+      if (
+        !multipart &&
+        !request.headers.get('content-type')?.includes('application/json')
+      )
         return fail(415, '请使用 JSON 请求');
-      if (Number(request.headers.get('content-length') || 0) > 24000)
+      if (Number(request.headers.get('content-length') || 0) > bodyLimit)
         return fail(413, '内容过长');
     }
     const owner = await store.get('config/owner');
@@ -100,6 +113,41 @@ export async function handle(
     const isAdmin = !!identity && owner?.userId === identity.id;
     const isMember = !!profile || isAdmin;
     if (request.method === 'GET') {
+      const url = new URL(request.url);
+      if (url.searchParams.has('attachment')) {
+        if (!identity) return fail(401, '请先登录');
+        if (!isMember) return fail(403, '请先加入班级');
+        const submissionId = text(
+          url.searchParams.get('submission'),
+          '提交编号',
+          220,
+        );
+        const attachmentId = text(
+          url.searchParams.get('attachment'),
+          '附件编号',
+          100,
+        );
+        const submission = await store.get(`submission/${submissionId}`);
+        if (!submission || (!isAdmin && submission.userId !== identity.id))
+          return fail(404, '附件不存在或无权访问');
+        const attachment = submission.attachments?.find(
+          (a: SubmissionAttachment) => a.id === attachmentId,
+        );
+        if (!attachment) return fail(404, '附件不存在或已移除');
+        if (!runtime.files) return fail(503, '附件服务暂时不可用');
+        const file = await runtime.files.get(attachment.id);
+        if (!file) return fail(404, '附件不存在');
+        return new Response(file, {
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'Content-Disposition': `attachment; filename="attachment"; filename*=UTF-8''${encodeURIComponent(attachment.name)}`,
+            'Cache-Control': 'no-store, private',
+            Vary: 'Cookie, Authorization',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "sandbox; default-src 'none'",
+          },
+        });
+      }
       const base: any = {
         provider,
         identity: identity
@@ -177,17 +225,52 @@ export async function handle(
       return respond(base);
     }
     if (!identity) return fail(401, '请先登录');
-    const raw = await request.text();
-    if (raw.length > 24000) return fail(413, '内容过长');
+    // Bound streamed bodies too: Content-Length is not always present or trustworthy.
+    const reader = request.body?.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    if (reader) {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > bodyLimit) {
+          await reader.cancel();
+          return fail(413, '内容过长，附件合计不能超过 3 MB');
+        }
+        chunks.push(value);
+      }
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
     let b: any;
+    let uploads: File[] = [];
     try {
-      b = JSON.parse(raw);
+      if (multipart) {
+        const form = await new Response(bytes, {
+          headers: {
+            'Content-Type': request.headers.get('content-type')!,
+          },
+        }).formData();
+        const payload = form.get('payload');
+        if (typeof payload !== 'string' || payload.length > 24000)
+          return fail(400, '提交信息无效');
+        b = JSON.parse(payload);
+        uploads = form.getAll('files') as File[];
+        if (uploads.some((f) => typeof f === 'string'))
+          return fail(400, '附件格式不正确');
+      } else b = JSON.parse(new TextDecoder().decode(bytes));
     } catch {
       return fail(400, '请求内容无效');
     }
     if (!b || typeof b !== 'object' || Array.isArray(b))
       return fail(400, '请求内容无效');
     const action = text(b.action, '操作', 40);
+    if (multipart && action !== 'submit') return fail(400, '此操作不支持附件');
     if (action === 'claim-admin') {
       if (owner) return fail(409, '管理员已设置，请联系当前学委');
       if (
@@ -327,6 +410,41 @@ export async function handle(
       const note = text(b.note, '提交说明', 2000, true);
       const key = `submission/${id}_${identity.id}`,
         old = await store.get(key);
+      if (b.version !== undefined && b.version !== (old?.version ?? null))
+        return fail(409, '提交记录已更新，请刷新后重试');
+      const retained =
+        b.attachments === undefined
+          ? (old?.attachments || []).map((a: SubmissionAttachment) => a.id)
+          : b.attachments;
+      if (
+        !Array.isArray(retained) ||
+        retained.some((a: unknown) => typeof a !== 'string') ||
+        new Set(retained).size !== retained.length
+      )
+        return fail(400, '附件列表无效');
+      const attachments: SubmissionAttachment[] = retained.map(
+        (attachmentId: string) => {
+          const attachment = old?.attachments?.find(
+            (a: SubmissionAttachment) => a.id === attachmentId,
+          );
+          if (!attachment) return fail(400, '不能引用其他提交的附件');
+          return attachment;
+        },
+      );
+      if (attachments.length + uploads.length > 5)
+        return fail(400, '每份作业最多上传 5 个附件');
+      if (
+        attachments.reduce((n, a) => n + a.size, 0) +
+          uploads.reduce((n, f) => n + f.size, 0) >
+        3 * 1024 * 1024
+      )
+        return fail(413, '附件合计不能超过 3 MB');
+      for (const file of uploads) {
+        text(file.name, '文件名', 180);
+        if (!file.size) return fail(400, '不能上传空文件');
+      }
+      if (uploads.length && !runtime.files)
+        return fail(503, '附件服务暂时不可用');
       const item = fresh(`${id}_${identity.id}`, {
         assignmentId: id,
         userId: identity.id,
@@ -335,9 +453,40 @@ export async function handle(
         note,
         link,
         late,
+        attachments,
       });
-      if (!(await store.put(key, item, old?.version ?? null)))
-        return fail(409, '打卡正在更新，请刷新');
+      const added: string[] = [];
+      try {
+        for (const file of uploads) {
+          const attachmentId = crypto.randomUUID();
+          added.push(attachmentId);
+          await runtime.files!.put(attachmentId, await file.arrayBuffer());
+          attachments.push({
+            id: attachmentId,
+            name: file.name.trim(),
+            size: file.size,
+          });
+        }
+        if (!(await store.put(key, item, old?.version ?? null)))
+          return fail(409, '打卡正在更新，请刷新');
+      } catch (error) {
+        // A failed write can have committed remotely; do not delete its attachments.
+        const persisted = await store.get(key);
+        if (persisted?.version !== item.version)
+          await Promise.all(
+            added.map((fileId) =>
+              runtime.files!.delete(fileId).catch(() => {}),
+            ),
+          );
+        throw error;
+      }
+      await Promise.all(
+        (old?.attachments || [])
+          .filter((a: SubmissionAttachment) => !retained.includes(a.id))
+          .map((a: SubmissionAttachment) =>
+            runtime.files?.delete(a.id).catch(() => {}),
+          ),
+      );
       return respond({ ok: true, id: item.id });
     }
     if (action === 'post') {

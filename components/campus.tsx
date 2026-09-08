@@ -47,7 +47,7 @@ import { Progress } from '@/components/ui/progress';
 import { Toaster, toast } from 'sonner';
 import { Editor, Field, values, Choice } from './campus-forms';
 import Account from './account';
-import type { RecordData } from '@/lib/service';
+import type { SubmissionAttachment } from '@/lib/service';
 const nav = [
   ['/', '班级概览', LayoutDashboard],
   ['/assignments', '作业打卡', ClipboardCheck],
@@ -136,6 +136,29 @@ function Toolbar({ children, search, setSearch }: any) {
       </label>
       {children}
     </div>
+  );
+}
+
+function SubmissionAttachments({
+  submission,
+}: {
+  submission?: { id: string; attachments?: SubmissionAttachment[] } | null;
+}) {
+  if (!submission?.attachments?.length) return null;
+  return (
+    <ul className="attachment-list">
+      {submission.attachments.map((file) => (
+        <li key={file.id}>
+          <Download size={16} aria-hidden="true" />
+          <a
+            href={`/api/campus?submission=${encodeURIComponent(submission.id)}&attachment=${encodeURIComponent(file.id)}`}
+            download={file.name}
+          >
+            {file.name} <small>{Math.ceil(file.size / 1024)} KB · 下载</small>
+          </a>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -239,8 +262,11 @@ export default function Campus() {
       try {
         const r = await fetch('/api/campus', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          headers:
+            payload instanceof FormData
+              ? undefined
+              : { 'Content-Type': 'application/json' },
+          body: payload instanceof FormData ? payload : JSON.stringify(payload),
         });
         const result: any = await r.json();
         if (!r.ok) throw new Error(result.error || '操作失败');
@@ -623,6 +649,7 @@ export default function Campus() {
               </h3>
               <p className="muted">{formatDate(sub.createdAt)}</p>
               <p className="prose">{sub.note || '已确认完成提交'}</p>
+              <SubmissionAttachments submission={sub} />
               {sub.link && (
                 <a
                   href={sub.link}
@@ -1023,7 +1050,7 @@ export default function Campus() {
           .replace(/"/g, '""') +
         '"';
       const lines = [
-        ['作业', '姓名', '学号', '状态', '提交时间', '链接', '说明'],
+        ['作业', '姓名', '学号', '状态', '提交时间', '链接', '说明', '附件'],
         ...rows.map((r: any) => [
           activeTask?.title,
           r.name,
@@ -1032,6 +1059,9 @@ export default function Campus() {
           r.submission?.createdAt,
           r.submission?.link,
           r.submission?.note,
+          r.submission?.attachments
+            ?.map((a: SubmissionAttachment) => a.name)
+            .join('；'),
         ]),
       ];
       const blob = new Blob(
@@ -1160,6 +1190,7 @@ export default function Campus() {
                               查看凭证
                             </a>
                           )}
+                          <SubmissionAttachments submission={r.submission} />
                           {r.submission?.note && (
                             <p className="muted">{r.submission.note}</p>
                           )}
