@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Field, values } from './campus-forms';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-export default function Account({ data, run, busy, reload }: any) {
+export default function Account({ data, run, busy, reload, onLogout }: any) {
   const [mode, setMode] = useState('login'),
     [authBusy, setAuthBusy] = useState(false),
     [reset, setReset] = useState(false),
@@ -40,29 +40,42 @@ export default function Account({ data, run, busy, reload }: any) {
         await auth.updateUser({ password: String(v.password) });
         setReset(false);
         toast.success('密码已更新');
-      } else if (mode === 'register') {
-        const u = await auth.signup(String(v.email), String(v.password), {
-          full_name: String(v.name),
+      } else if (mode === 'register' || mode === 'login') {
+        const response = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            mode === 'register'
+              ? {
+                  action: 'register',
+                  username: String(v.username),
+                  email: String(v.email),
+                  password: String(v.password),
+                }
+              : {
+                  action: 'login',
+                  identifier: String(v.identifier),
+                  password: String(v.password),
+                },
+          ),
         });
-        if (u.confirmedAt) {
-          setNotice('注册成功，现在可以登录。');
-        } else {
-          setMode('login');
-          setNotice('确认邮件已发送。请先点击邮件里的链接，再回到这里登录。');
-        }
-        toast.success(u.confirmedAt ? '注册成功' : '确认邮件已发送');
+        const result = (await response.json()) as { error?: string };
+        if (!response.ok) throw new Error(result.error || '登录失败');
+        toast.success(
+          mode === 'register' ? '注册成功，已自动登录' : '欢迎回来',
+        );
       } else if (mode === 'recovery') {
         await auth.requestPasswordRecovery(String(v.email));
         setNotice(
           '如果账号存在，密码重置邮件已经发送。请查看收件箱和垃圾邮件。',
         );
         toast.success('如果账号存在，你会收到密码重置邮件');
-      } else {
-        await auth.login(String(v.email), String(v.password));
-        toast.success('欢迎回来');
       }
       const fresh = await reload();
-      if (mode === 'login' && (fresh.profile || fresh.isAdmin))
+      if (
+        (mode === 'login' || mode === 'register') &&
+        (fresh.profile || fresh.isAdmin)
+      )
         window.location.href = '/';
     } catch (e: any) {
       toast.error(e.message || '暂时无法登录，请稍后重试');
@@ -70,17 +83,27 @@ export default function Account({ data, run, busy, reload }: any) {
       setAuthBusy(false);
     }
   }
-  async function logout() {
-    if (data.provider === 'sites') {
-      window.location.href = '/signout-with-chatgpt?return_to=/account';
-      return;
-    }
+  async function setUsername(e: any) {
+    e.preventDefault();
+    const v = values(e);
+    setAuthBusy(true);
     try {
-      const auth = await import('@netlify/identity');
-      await auth.logout();
+      const response = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set-username',
+          username: String(v.username),
+        }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error || '账号设置失败');
       await reload();
-    } catch {
-      toast.error('退出失败，请重试');
+      toast.success('登录账号已设置');
+    } catch (e: any) {
+      toast.error(e.message || '账号设置失败，请稍后重试');
+    } finally {
+      setAuthBusy(false);
     }
   }
   if (!data.identity || reset)
@@ -117,10 +140,40 @@ export default function Account({ data, run, busy, reload }: any) {
               </Tabs>
               <form className="form-stack mt-5" onSubmit={authSubmit}>
                 {mode === 'register' && !reset && (
-                  <Field label="姓名" name="name" max={30} />
+                  <label className="field">
+                    <span>账号（3–24 位）</span>
+                    <input
+                      name="username"
+                      required
+                      minLength={3}
+                      maxLength={24}
+                      autoComplete="username"
+                      placeholder="中英文、数字、下划线或短横线"
+                    />
+                  </label>
                 )}{' '}
-                {!reset && (
-                  <Field label="邮箱" name="email" type="email" max={254} />
+                {mode === 'login' && !reset && (
+                  <label className="field">
+                    <span>账号或邮箱</span>
+                    <input
+                      name="identifier"
+                      required
+                      maxLength={254}
+                      autoComplete="username"
+                    />
+                  </label>
+                )}{' '}
+                {(mode === 'register' || mode === 'recovery') && !reset && (
+                  <Field
+                    label={
+                      mode === 'register'
+                        ? '邮箱（仅用于找回密码）'
+                        : '注册邮箱'
+                    }
+                    name="email"
+                    type="email"
+                    max={254}
+                  />
                 )}{' '}
                 {(mode !== 'recovery' || reset) && (
                   <label className="field">
@@ -149,6 +202,11 @@ export default function Account({ data, run, busy, reload }: any) {
                           : '发送重置邮件'}
                 </button>
               </form>
+              {mode === 'register' && (
+                <p className="auth-hint">
+                  注册后会直接登录，无需打开邮箱验证。请填写能正常收信的邮箱，方便忘记密码时找回账号。
+                </p>
+              )}
             </>
           )}
         </section>
@@ -172,11 +230,32 @@ export default function Account({ data, run, busy, reload }: any) {
       <section className="panel account-panel">
         <div className="section-heading">
           <h2>{data.profile ? '个人资料' : '加入我们的班级'}</h2>
-          <button className="button secondary small" onClick={logout}>
+          <button className="button secondary small" onClick={onLogout}>
             退出登录
           </button>
         </div>
-        <p className="muted">{data.identity.email}</p>
+        <p className="muted">
+          账号：{data.identity.username || '还未设置'} · 邮箱：
+          {data.identity.email}
+        </p>
+        {data.provider === 'netlify' && !data.identity.username && (
+          <form className="inline-account-setup" onSubmit={setUsername}>
+            <label className="field">
+              <span>设置登录账号</span>
+              <input
+                name="username"
+                required
+                minLength={3}
+                maxLength={24}
+                autoComplete="username"
+                placeholder="设置后也可以用账号登录"
+              />
+            </label>
+            <button className="button secondary" disabled={authBusy}>
+              {authBusy ? '保存中…' : '保存账号'}
+            </button>
+          </form>
+        )}
         <form
           className="form-stack mt-5"
           onSubmit={async (e) => {

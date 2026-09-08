@@ -13,7 +13,12 @@ export interface Store {
     expected?: string | null,
   ): Promise<boolean>;
 }
-export type Identity = { id: string; name: string; email: string } | null;
+export type Identity = {
+  id: string;
+  name: string;
+  email: string;
+  username?: string;
+} | null;
 export type Runtime = {
   store: Store;
   identity: Identity;
@@ -98,7 +103,12 @@ export async function handle(
       const base: any = {
         provider,
         identity: identity
-          ? { id: identity.id, name: identity.name, email: identity.email }
+          ? {
+              id: identity.id,
+              name: identity.name,
+              email: identity.email,
+              username: identity.username,
+            }
           : null,
         profile,
         isAdmin,

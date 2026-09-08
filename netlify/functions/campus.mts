@@ -48,6 +48,10 @@ export default async (req: Request) => {
           id: user.id,
           name: user.name || user.email || '同学',
           email: user.email || '',
+          username:
+            typeof user.userMetadata?.username === 'string'
+              ? user.userMetadata.username
+              : undefined,
         }
       : null,
     setupSecret: Netlify.env.get('ADMIN_SETUP_SECRET'),

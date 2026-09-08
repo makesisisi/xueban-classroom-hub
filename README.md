@@ -12,11 +12,11 @@
 
 ## 首次开班
 
-1. 打开 Netlify 的「注册 / 登录」，注册邮箱账号，按照邮件确认后登录。
+1. 打开 Netlify 的「注册 / 登录」，填写登录账号、找回邮箱和密码；注册后会自动登录，无需邮箱确认。
 2. 进入「我的账号」底部的「我是学委 · 初始化班级」，输入本机 `.env` 内的 `ADMIN_SETUP_SECRET`。初始化码不能分享给同学，也不能提交到 Git。
 3. 在「学委工作台 → 班级设置」填写班级名、学期和至少 8 位的邀请码。
 4. 回到「我的账号」填写姓名与学号。
-5. 将网站和班级邀请码发给同学。他们需要注册、验证邮箱并加入班级，才能看到班级信息。
+5. 将网站和班级邀请码发给同学。他们注册并加入班级后，才能看到班级信息。
 6. 在「内容管理」添加老师、发布作业和公告；在「作业统计」查看已交、未交、迟交名单并导出 CSV。
 
 Sites 版本使用 ChatGPT 登录，首次登录同样填写个人资料并初始化自己的班级。当前 Sites 的外层访问范围为负责人私有。
@@ -28,7 +28,7 @@ Sites 版本使用 ChatGPT 登录，首次登录同样填写个人资料并初�
 - 统计：全班名单、已交 / 未交 / 迟交、提交时间和凭证链接、CSV 导出（防公式注入）。
 - 社区：学习提问、经验分享、小吐槽、向同学匿名显示、话题审核、帖子详情和回复。学委能够看到匿名发帖者。
 - 公告：发布、分类、搜索、详情、编辑与归档。
-- 账号：Netlify 邮箱注册、验证、登录、退出和密码恢复；Sites ChatGPT 登录；姓名、学号、班级邀请码。
+- 账号：Netlify 账号 / 邮箱登录、免验证注册、全局退出和密码恢复；Sites ChatGPT 登录；姓名、学号、班级邀请码。
 - 管理：安全初始化唯一管理员、班级设置、邀请码轮换、内容管理、社区审核。
 
 ## 功能边界
@@ -77,7 +77,7 @@ npm.cmd run build:netlify
 
 ### Netlify
 
-使用 `netlify.toml`：构建命令 `npm run build:netlify`，静态目录 `netlify-dist`，Functions 目录 `netlify/functions`。`ADMIN_SETUP_SECRET` 在 Netlify 环境变量中设置。开启 Identity，保持注册开放、邮箱确认开启。
+使用 `netlify.toml`：构建命令 `npm run build:netlify`，静态目录 `netlify-dist`，Functions 目录 `netlify/functions`。`ADMIN_SETUP_SECRET` 在 Netlify 环境变量中设置。开启 Identity；`/api/auth` 通过 Identity 管理接口创建已确认用户，因此新用户不需要点击确认邮件。
 
 ```powershell
 npm.cmd exec --yes --package=netlify-cli -- netlify deploy --prod --no-build --dir netlify-dist --functions netlify/functions
@@ -95,7 +95,7 @@ npm.cmd exec --yes --package=netlify-cli -- netlify deploy --prod --no-build --d
 - 本地实际 D1 读写：初始化、加入班级、添加教师 / 作业 / 公告、打卡及重新读取，匿名隐私隔离。
 - Sites 与 Netlify 两种生产构建、TypeScript 检查。
 - Netlify 线上密码登录、JWT 身份校验、真实 Blobs 条件写入、打卡与重新读取、匿名数据隔离通过；临时验证账号和数据已清理。
-- 浏览器点击、手机截图以及实际邮箱收件链路未在本次执行中测试。WebMCP 仅在支持该标准的浏览器中注册只读作业工具；当前没有可用的验证上下文，未声称完成 WebMCP 运行验证。
+- 已用 390 × 844 手机视口检查会话恢复页、登录和注册表单，并验证不存在账号登录时会返回清晰错误；新账号成功注册和实际密码重置邮件仍需用真实邮箱完成最终确认。WebMCP 仅在支持该标准的浏览器中注册只读作业工具。
 
 仅初始化码保存在本地忽略文件；仓库、前端和提交记录中不得放置账号令牌与密钥。
 

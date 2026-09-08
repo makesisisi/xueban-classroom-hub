@@ -24,6 +24,7 @@ import {
   Download,
   Archive,
   RotateCcw,
+  LogOut,
 } from 'lucide-react';
 import {
   Sidebar,
@@ -209,6 +210,22 @@ export default function Campus() {
     },
     [reload],
   );
+  const logout = useCallback(async () => {
+    setBusy(true);
+    try {
+      if (data.provider === 'sites') {
+        window.location.href = '/signout-with-chatgpt?return_to=/account';
+        return;
+      }
+      const auth = await import('@netlify/identity');
+      await auth.logout();
+      toast.success('已安全退出');
+      window.location.href = '/account';
+    } catch {
+      toast.error('退出失败，请重试');
+      setBusy(false);
+    }
+  }, [data.provider]);
   useEffect(() => {
     const context = (document as any).modelContext;
     if (!context?.registerTool) return;
@@ -256,6 +273,17 @@ export default function Campus() {
     } catch {}
     return () => controller.abort();
   }, [reload]);
+  if (loading)
+    return (
+      <div className="auth-loading-shell" role="status" aria-live="polite">
+        <span className="brand-icon">
+          <GraduationCap />
+        </span>
+        <strong>学伴</strong>
+        <span>正在恢复登录状态…</span>
+      </div>
+    );
+
   const label =
     nav.find(([href]) => href === `/${section}`)?.[1] ||
     (section === 'account' ? '我的账号' : '班级概览');
@@ -1334,22 +1362,46 @@ export default function Campus() {
           </div>
         </SidebarContent>
         <SidebarFooter>
-          <a href="/account" className="account-link">
-            <span className="avatar">
-              {(data.profile?.name || '同').slice(0, 1)}
-            </span>
-            <span>
-              {data.profile?.name || '欢迎，同学'}
-              <small>
-                {data.isAdmin
-                  ? '学习委员'
-                  : data.profile
-                    ? '班级成员'
-                    : '登录后加入班级'}
-              </small>
-            </span>
-            <ArrowUpRight size={18} />
-          </a>
+          <div className="sidebar-account-row">
+            <a href="/account" className="account-link">
+              <span className="avatar">
+                {(
+                  data.profile?.name ||
+                  data.identity?.username ||
+                  data.identity?.name ||
+                  '同'
+                ).slice(0, 1)}
+              </span>
+              <span>
+                {data.profile?.name ||
+                  data.identity?.username ||
+                  data.identity?.name ||
+                  '欢迎，同学'}
+                <small>
+                  {data.isAdmin
+                    ? '学习委员'
+                    : data.profile
+                      ? '班级成员'
+                      : data.identity
+                        ? '完善资料并加入班级'
+                        : '登录后加入班级'}
+                </small>
+              </span>
+              {!data.identity && <ArrowUpRight size={18} />}
+            </a>
+            {data.identity && (
+              <button
+                className="sidebar-logout"
+                type="button"
+                onClick={logout}
+                disabled={busy}
+                aria-label="退出登录"
+                title="退出登录"
+              >
+                <LogOut size={18} />
+              </button>
+            )}
+          </div>
         </SidebarFooter>
       </Sidebar>
       <div className="app-main">
@@ -1360,10 +1412,20 @@ export default function Campus() {
               班级空间 <span className="crumb">/ {label}</span>
             </span>
           </div>
-          <a className="button small" href="/account">
-            {data.identity ? '我的账号' : '注册 / 登录'}{' '}
-            <ArrowUpRight size={15} />
-          </a>
+          {data.identity ? (
+            <button
+              className="button secondary small topbar-logout"
+              type="button"
+              onClick={logout}
+              disabled={busy}
+            >
+              <LogOut size={15} /> 退出登录
+            </button>
+          ) : (
+            <a className="button small" href="/account">
+              注册 / 登录 <ArrowUpRight size={15} />
+            </a>
+          )}
         </header>
         <main className="page">
           <div className="page-heading">
@@ -1404,7 +1466,13 @@ export default function Campus() {
           {section === 'home' ? (
             Dashboard()
           ) : section === 'account' ? (
-            <Account data={data} run={run} busy={busy} reload={reload} />
+            <Account
+              data={data}
+              run={run}
+              busy={busy}
+              reload={reload}
+              onLogout={logout}
+            />
           ) : !member ? (
             guard
           ) : section === 'assignments' ? (
