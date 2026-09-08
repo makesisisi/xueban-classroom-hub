@@ -72,6 +72,14 @@ const initial: any = {
   comments: [],
   members: [],
 };
+const currentPath = () =>
+  typeof window === 'undefined'
+    ? '/'
+    : window.location.pathname.replace(/\/$/, '') || '/';
+const isCampusRoute = (pathname: string) =>
+  /^\/(?:|account|admin|assignments(?:\/[^/]+)?|teachers(?:\/[^/]+)?|community(?:\/[^/]+)?|notices(?:\/[^/]+)?)\/?$/.test(
+    pathname,
+  );
 const formatDate = (v: string) =>
   new Date(v).toLocaleString('zh-CN', {
     month: 'short',
@@ -133,7 +141,7 @@ function Toolbar({ children, search, setSearch }: any) {
 
 export default function Campus() {
   const [data, setData] = useState(initial),
-    [path, setPath] = useState('/'),
+    [path, setPath] = useState(currentPath),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
@@ -153,6 +161,45 @@ export default function Campus() {
     const timer = window.setInterval(() => setNow(Date.now()), 60000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    const syncPath = () => {
+      setPath(currentPath());
+      setModal(null);
+    };
+    const navigate = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest<HTMLAnchorElement>('a[href]');
+      if (!anchor || anchor.target || anchor.hasAttribute('download')) return;
+      const url = new URL(anchor.href, window.location.href);
+      if (url.origin !== window.location.origin || !isCampusRoute(url.pathname))
+        return;
+      event.preventDefault();
+      if (
+        url.pathname === window.location.pathname &&
+        url.hash === window.location.hash
+      )
+        return;
+      window.history.pushState(null, '', url.pathname + url.search + url.hash);
+      syncPath();
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    };
+    document.addEventListener('click', navigate);
+    window.addEventListener('popstate', syncPath);
+    return () => {
+      document.removeEventListener('click', navigate);
+      window.removeEventListener('popstate', syncPath);
+    };
+  }, []);
   const reload = useCallback(async () => {
     try {
       const r = await fetch('/api/campus', { cache: 'no-store' });
@@ -169,7 +216,6 @@ export default function Campus() {
     }
   }, []);
   useEffect(() => {
-    setPath(window.location.pathname.replace(/\/$/, '') || '/');
     if (
       initial.provider === 'netlify' &&
       /(?:confirmation_token|recovery_token|invite_token|access_token)=/.test(
@@ -273,17 +319,6 @@ export default function Campus() {
     } catch {}
     return () => controller.abort();
   }, [reload]);
-  if (loading)
-    return (
-      <div className="auth-loading-shell" role="status" aria-live="polite">
-        <span className="brand-icon">
-          <GraduationCap />
-        </span>
-        <strong>学伴</strong>
-        <span>正在恢复登录状态…</span>
-      </div>
-    );
-
   const label =
     nav.find(([href]) => href === `/${section}`)?.[1] ||
     (section === 'account' ? '我的账号' : '班级概览');
@@ -1412,7 +1447,7 @@ export default function Campus() {
               班级空间 <span className="crumb">/ {label}</span>
             </span>
           </div>
-          {data.identity ? (
+          {!loading && data.identity ? (
             <button
               className="button secondary small topbar-logout"
               type="button"
@@ -1421,11 +1456,11 @@ export default function Campus() {
             >
               <LogOut size={15} /> 退出登录
             </button>
-          ) : (
+          ) : !loading ? (
             <a className="button small" href="/account">
               注册 / 登录 <ArrowUpRight size={15} />
             </a>
-          )}
+          ) : null}
         </header>
         <main className="page">
           <div className="page-heading">
@@ -1441,7 +1476,7 @@ export default function Campus() {
               </h1>
               <p className="muted">{subtitles[section]}</p>
             </div>
-            {section === 'home' && (
+            {section === 'home' && !loading && (
               <a href={homeAction.href} className="button">
                 {homeAction.label} <ArrowRight size={17} />
               </a>
@@ -1458,12 +1493,13 @@ export default function Campus() {
               </button>
             </div>
           )}
-          {loading && (
-            <p role="status" className="muted loading-line">
-              正在读取班级信息…
-            </p>
-          )}
-          {section === 'home' ? (
+          {loading ? (
+            <div className="content-skeleton" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
+          ) : section === 'home' ? (
             Dashboard()
           ) : section === 'account' ? (
             <Account

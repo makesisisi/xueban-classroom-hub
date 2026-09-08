@@ -1290,21 +1290,22 @@ footer {
 .loading-line {
   margin-bottom: 15px;
 }
-.auth-loading-shell {
-  min-height: 100dvh;
+.content-skeleton {
   display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 10px;
-  color: #747b90;
-  background: #f8f9fd;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 18px;
 }
-.auth-loading-shell strong {
-  color: #292f47;
-  font-size: 22px;
+.content-skeleton span {
+  min-height: 180px;
+  border: 1px solid #eceef5;
+  border-radius: 12px;
+  background: linear-gradient(100deg, #f4f5fa 35%, #fafbfe 50%, #f4f5fa 65%);
+  background-size: 220% 100%;
+  animation: content-loading 1.2s ease-in-out infinite;
 }
-.auth-loading-shell .brand-icon {
-  animation: auth-pulse 1.3s ease-in-out infinite;
+.content-skeleton span:first-child {
+  grid-column: 1 / -1;
+  min-height: 220px;
 }
 .auth-hint {
   margin-top: 4px;
@@ -1329,10 +1330,9 @@ footer {
 .inline-account-setup .button {
   flex: none;
 }
-@keyframes auth-pulse {
-  50% {
-    transform: translateY(-3px);
-    opacity: 0.72;
+@keyframes content-loading {
+  to {
+    background-position-x: -220%;
   }
 }
 .admin-tabs {
@@ -1370,6 +1370,14 @@ footer {
   }
 }
 @media (max-width: 640px) {
+  .content-skeleton {
+    grid-template-columns: 1fr;
+  }
+  .content-skeleton span,
+  .content-skeleton span:first-child {
+    grid-column: auto;
+    min-height: 150px;
+  }
   .inline-account-setup {
     align-items: stretch;
     flex-direction: column;
